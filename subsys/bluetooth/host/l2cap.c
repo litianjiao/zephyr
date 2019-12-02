@@ -751,6 +751,11 @@ static void l2cap_chan_destroy(struct bt_l2cap_chan *chan)
 	/* Cancel ongoing work */
 	k_delayed_work_cancel(&chan->rtx_work);
 
+	if (ch->tx_buf) {
+		net_buf_unref(ch->tx_buf);
+		ch->tx_buf = NULL;
+	}
+
 	/* Remove buffers on the TX queue */
 	while ((buf = net_buf_get(&ch->tx_queue, K_NO_WAIT))) {
 		net_buf_unref(buf);
@@ -1221,7 +1226,7 @@ static int l2cap_chan_le_send(struct bt_l2cap_le_chan *ch, struct net_buf *buf,
 }
 
 static int l2cap_chan_le_send_sdu(struct bt_l2cap_le_chan *ch,
-				  struct net_buf **buf, int sent)
+				  struct net_buf **buf, u16_t sent)
 {
 	int ret, total_len;
 	struct net_buf *frag;
@@ -1299,7 +1304,7 @@ static void l2cap_chan_le_send_resume(struct bt_l2cap_le_chan *ch)
 
 	/* Resume tx in case there are buffers in the queue */
 	while ((buf = l2cap_chan_le_get_tx_buf(ch))) {
-		int sent = *((int *)net_buf_user_data(buf));
+		u16_t sent = *((u16_t *)net_buf_user_data(buf));
 
 		BT_DBG("buf %p sent %u", buf, sent);
 
@@ -1671,6 +1676,7 @@ static void l2cap_chan_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 	BT_DBG("chan %p len %u", chan, buf->len);
 
 	chan->ops->recv(chan, buf);
+	net_buf_unref(buf);
 }
 
 void bt_l2cap_recv(struct bt_conn *conn, struct net_buf *buf)
@@ -1704,7 +1710,6 @@ void bt_l2cap_recv(struct bt_conn *conn, struct net_buf *buf)
 	}
 
 	l2cap_chan_recv(chan, buf);
-	net_buf_unref(buf);
 }
 
 int bt_l2cap_update_conn_param(struct bt_conn *conn,
@@ -1890,7 +1895,7 @@ int bt_l2cap_chan_send(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		if (err == -EAGAIN) {
 			/* Queue buffer to be sent later */
 			net_buf_put(&(BT_L2CAP_LE_CHAN(chan))->tx_queue, buf);
-			return *((int *)net_buf_user_data(buf));
+			return *((u16_t *)net_buf_user_data(buf));
 		}
 		BT_ERR("failed to send message %d", err);
 	}
